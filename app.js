@@ -4,7 +4,8 @@ const express = require("express");
 const bodyPerser = require("body-parser");
 const ejs = require("ejs");
 const mongoose = require("mongoose");
-const md5 = require("md5");
+const bcrypt = require("bcryptjs");
+const saltRounds = 10;
 
 const app = express();
 app.use(express.static("public"));
@@ -28,9 +29,6 @@ const secret = process.env.SECRET;
 
 const User = new mongoose.model("User", userSchema);
 
-console.log(md5("123456"));
-
-
 app.get("/", (req, res) => {
     res.render("home");
 });
@@ -44,23 +42,32 @@ app.get("/register", (req, res) => {
 });
 
 app.post("/register", (req, res) => {
-    const newUser = new User ({
+    bcrypt.hash(req.body.password, saltRounds, function(err, hash) {
+        if (err) {
+            console.log("Error while hashing password", err);
+            return res.status(500).send("Error processing request");
+        } 
+        
+        const newUser = new User ({
         email: req.body.username,
-        password: md5(req.body.password)
+        password: hash
     });
-
-    try {
-        newUser.save();
-        console.log(err);
-    } catch {
+    
+    newUser.save()
+    .then(() => {
         res.render("secrets");
-    }
+    })
+    .catch(saveErr => {
+        console.log("Error saving user", saveErr);
+        res.status(500).send("Error saving user");
+    });
+});
 });
 
 
 app.post("/login", async (req, res) => {
     const username = req.body.username;
-    const password = md5(req.body.password);
+    const password = req.body.password;
 
     try {
         const foundUser = await User.findOne({email: username});
@@ -68,14 +75,16 @@ app.post("/login", async (req, res) => {
         if (!foundUser) {
             return res.status(401).send("User not found");
         } 
-        if (foundUser.password !== password) {
-                return res.status(401).send("Incorrect password");
+
+        const match = await bcrypt.compare(password, foundUser.password);
+        if (match) {
+            res.render("secrets");
+        } else {
+            res.status(401).send("Incorrect password");
         }
-
-        return res.render("secrets");
-
     } catch (err) {
         console.log(err);
+        res.status(500).send("Internal Error");
     }
 });
 
